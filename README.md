@@ -315,7 +315,8 @@ Common configurations:
 
 |field|default value|description|
 |-|-|-|
-|etcd.endpoints|"localhost:2379"|The etcd endpoint(s), multiple endpoints can be passed separated by comma.|
+|etcd.write_endpoints|"localhost:2379"|The etcd endpoint(s) to write to, multiple endpoints can be passed separated by comma.|
+|etcd.read_endpoints|"localhost:2379"|The etcd endpoint(s) to read from, multiple endpoints can be passed separated by comma.|
 |etcd.dial_timeout|"2s"|The dial timeout duration passed into the client config.|
 |etcd.cert_file|""|When using secure etcd, this should point to the crt file.|
 |etcd.key_file|""|When using secure etcd, this should point to the pem file.|

@@ -19,7 +19,8 @@ import (
 
 // properties
 const (
-	etcdEndpoints         = "etcd.endpoints"
+	etcdWriteEndpoints    = "etcd.write_endpoints"
+	etcdReadEndpoints     = "etcd.read_endpoints"
 	etcdDialTimeout       = "etcd.dial_timeout"
 	etcdCertFile          = "etcd.cert_file"
 	etcdKeyFile           = "etcd.key_file"
@@ -30,8 +31,9 @@ const (
 type etcdCreator struct{}
 
 type etcdDB struct {
-	p      *properties.Properties
-	client *clientv3.Client
+	p           *properties.Properties
+	readClient  *clientv3.Client
+	writeClient *clientv3.Client
 }
 
 func init() {
@@ -39,24 +41,35 @@ func init() {
 }
 
 func (c etcdCreator) Create(p *properties.Properties) (ycsb.DB, error) {
-	cfg, err := getClientConfig(p)
+	writeCfg, err := getClientConfig(p, etcdWriteEndpoints)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := clientv3.New(*cfg)
+	readCfg, err := getClientConfig(p, etcdReadEndpoints)
+	if err != nil {
+		return nil, err
+	}
+
+	writeClient, err := clientv3.New(*writeCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	readClient, err := clientv3.New(*readCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	return &etcdDB{
-		p:      p,
-		client: client,
+		p:           p,
+		readClient:  readClient,
+		writeClient: writeClient,
 	}, nil
 }
 
-func getClientConfig(p *properties.Properties) (*clientv3.Config, error) {
-	endpoints := p.GetString(etcdEndpoints, "localhost:2379")
+func getClientConfig(p *properties.Properties, endpointsKey string) (*clientv3.Config, error) {
+	endpoints := p.GetString(endpointsKey, "localhost:2379")
 	dialTimeout := p.GetDuration(etcdDialTimeout, 2*time.Second)
 
 	var tlsConfig *tls.Config
@@ -81,7 +94,11 @@ func getClientConfig(p *properties.Properties) (*clientv3.Config, error) {
 }
 
 func (db *etcdDB) Close() error {
-	return db.client.Close()
+	err := db.readClient.Close()
+	if err != nil {
+		return err
+	}
+	return db.writeClient.Close()
 }
 
 func (db *etcdDB) InitThread(ctx context.Context, _ int, _ int) context.Context {
@@ -101,7 +118,7 @@ func (db *etcdDB) Read(ctx context.Context, table string, key string, _ []string
 	if db.p.GetBool(etcdSerializableReads, false) {
 		options = append(options, clientv3.WithSerializable())
 	}
-	value, err := db.client.Get(ctx, rkey, options...)
+	value, err := db.readClient.Get(ctx, rkey, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +142,7 @@ func (db *etcdDB) Scan(ctx context.Context, table string, startKey string, count
 	if db.p.GetBool(etcdSerializableReads, false) {
 		options = append(options, clientv3.WithSerializable())
 	}
-	values, err := db.client.Get(ctx, rkey, options...)
+	values, err := db.readClient.Get(ctx, rkey, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +168,7 @@ func (db *etcdDB) Update(ctx context.Context, table string, key string, values m
 	if err != nil {
 		return err
 	}
-	_, err = db.client.Put(ctx, rkey, string(data))
+	_, err = db.writeClient.Put(ctx, rkey, string(data))
 	if err != nil {
 		return err
 	}
@@ -164,7 +181,7 @@ func (db *etcdDB) Insert(ctx context.Context, table string, key string, values m
 }
 
 func (db *etcdDB) Delete(ctx context.Context, table string, key string) error {
-	_, err := db.client.Delete(ctx, getRowKey(table, key))
+	_, err := db.writeClient.Delete(ctx, getRowKey(table, key))
 	if err != nil {
 		return err
 	}
