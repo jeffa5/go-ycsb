@@ -115,7 +115,8 @@ func getRowKey(table string, key string) string {
 func (db *etcdDB) Read(ctx context.Context, table string, key string, _ []string) (map[string][]byte, error) {
 	rkey := getRowKey(table, key)
 	var options []clientv3.OpOption
-	if db.p.GetBool(etcdSerializableReads, false) {
+	serializableReads := db.p.GetBool(etcdSerializableReads, false)
+	if serializableReads {
 		options = append(options, clientv3.WithSerializable())
 	}
 	value, err := db.readClient.Get(ctx, rkey, options...)
@@ -123,14 +124,16 @@ func (db *etcdDB) Read(ctx context.Context, table string, key string, _ []string
 		return nil, err
 	}
 
-	if value.Count == 0 {
+	if !serializableReads && value.Count == 0 {
 		return nil, fmt.Errorf("could not find value for key [%s]", rkey)
 	}
 
 	var r map[string][]byte
-	err = json.NewDecoder(bytes.NewReader(value.Kvs[0].Value)).Decode(&r)
-	if err != nil {
-		return nil, err
+	if value.Count > 0 {
+		err = json.NewDecoder(bytes.NewReader(value.Kvs[0].Value)).Decode(&r)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return r, nil
 }
@@ -139,7 +142,8 @@ func (db *etcdDB) Scan(ctx context.Context, table string, startKey string, count
 	res := make([]map[string][]byte, count)
 	rkey := getRowKey(table, startKey)
 	options := []clientv3.OpOption{clientv3.WithFromKey(), clientv3.WithLimit(int64(count))}
-	if db.p.GetBool(etcdSerializableReads, false) {
+	serializableReads := db.p.GetBool(etcdSerializableReads, false)
+	if serializableReads {
 		options = append(options, clientv3.WithSerializable())
 	}
 	values, err := db.readClient.Get(ctx, rkey, options...)
@@ -147,7 +151,7 @@ func (db *etcdDB) Scan(ctx context.Context, table string, startKey string, count
 		return nil, err
 	}
 
-	if values.Count != int64(count) {
+	if !serializableReads && values.Count != int64(count) {
 		return nil, fmt.Errorf("unexpected number of result for key [%s], expected %d but was %d", rkey, count, values.Count)
 	}
 
